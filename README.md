@@ -11,10 +11,15 @@ decision.
 
 | Capability | How |
 |---|---|
+| Authentication | login for proctor + self-service candidate login (pbkdf2 hashed) |
+| Multi-user sessions | each candidate gets an isolated exam session; proctor sees all live candidates on a dashboard |
 | Face verification | `face-api.js` 128-d descriptor matching vs an enrolled reference |
-| Multiple-person detection | face count + `coco-ssd` person count |
+| Multiple-person detection | face count + MediaPipe person count |
+| Eye detection | eye landmarks + Eye Aspect Ratio (open/closed) |
 | Gaze / head-pose (attention) | 68-point landmark geometry (explainable heuristic) |
-| Object detection | `coco-ssd`: phone, book, extra device |
+| Object detection | MediaPipe (WASM): phone, book, extra device |
+| Hand detection + hand-object interaction | MediaPipe Hand Landmarker; flags a hand on a phone/book |
+| Secure phone pairing | per-session token in a QR on the candidate's exam page |
 | Temporal reasoning | sliding-window rules — a signal must be *sustained/repeated* to become an incident |
 | Cross-camera correlation | incidents confirmed by both cameras are trusted more |
 | Explainable risk | smoothed, decaying weighted score with a per-incident breakdown |
@@ -32,11 +37,12 @@ Everything is already installed. Just run:
 start_demo.bat
 ```
 
-Then open in your browser:
+Then open **http://localhost:8000** — you'll be sent to the **login** page.
 
-- **Landing:** http://localhost:8000
-- **Candidate (exam):** http://localhost:8000/candidate?session=exam-001
-- **Proctor dashboard:** http://localhost:8000/proctor?session=exam-001
+- **Proctor:** click *Proctor*, sign in with **admin / admin123** → dashboard of all live candidates.
+- **Candidate:** click *Candidate*, enter a name + any roll number + password (first login creates the account) → your own isolated exam page.
+
+Open the candidate in one tab and the proctor in another (sign in as proctor, click the candidate). Two different candidate logins = two isolated sessions, so people no longer collide. The candidate's exam page shows a **QR (with a secure token)** to pair a phone as the secondary camera.
 
 **Demo steps**
 1. Open the **Candidate** tab → *Enable Camera* → type a name → *Capture Reference Face* → *Start Exam*.

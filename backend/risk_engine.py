@@ -91,6 +91,7 @@ class SessionRisk:
 
     def __init__(self, session_id):
         self.session_id = session_id
+        self.candidate_name = "Candidate"
         self.buffers = {"candidate": deque(), "mobile": deque()}
         self.latest = {"candidate": None, "mobile": None}
         self.active = {}          # type -> Incident  (currently live incidents)
@@ -216,6 +217,18 @@ class SessionRisk:
                         title="Additional device detected",
                         severity="low", weight=10, conf=frac_dev, cam=cam,
                         signal=f"An extra device was visible in {int(frac_dev*100)}% of recent frames ({cam} camera)")
+
+        # HAND - OBJECT INTERACTION ----------------------------------------
+        frac_hand, _ = self._fraction(frames, lambda f: f.get("hand_on_object"))
+        if frac_hand >= 0.35:
+            objs = [f.get("hand_object_class") for f in frames if f.get("hand_on_object") and f.get("hand_object_class")]
+            obj = max(set(objs), key=objs.count) if objs else "an item"
+            is_phone = obj == "cell phone"
+            self._merge(findings, "HAND_ON_OBJECT",
+                        title=f"Hand interacting with {obj}",
+                        severity="high" if is_phone else "medium",
+                        weight=28 if is_phone else 16, conf=frac_hand, cam=cam,
+                        signal=f"A hand was on/near {obj} in {int(frac_hand*100)}% of recent frames ({cam} camera)")
 
     def _merge(self, findings, itype, title, severity, weight, conf, cam, signal):
         f = findings.get(itype)

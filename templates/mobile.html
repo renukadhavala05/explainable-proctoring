@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="/static/css/style.css" />
   <script src="/static/js/vendor/face-api.min.js"></script>
   <script type="module" src="/static/js/mp-setup.mjs"></script>
-  <script src="/static/js/detection.js?v=4"></script>
+  <script src="/static/js/detection.js?v=5"></script>
 </head>
 <body class="mobile">
   <div class="topbar">
@@ -33,10 +33,15 @@
 
   <script>
     const params = new URLSearchParams(location.search);
-    const sessionId = params.get("session") || "exam-001";
-    document.getElementById("sidlbl").textContent = "· " + sessionId;
+    const sessionId = params.get("session");
+    const token = params.get("token") || "";
+    document.getElementById("sidlbl").textContent = sessionId ? ("· " + sessionId) : "";
     const statusEl = document.getElementById("status");
     const pill = document.getElementById("pill");
+    if (!sessionId || !token) {
+      statusEl.textContent = "Invalid or missing pairing code. Please scan the QR from the candidate's exam page again.";
+      document.getElementById("startBtn").disabled = true;
+    }
 
     let client = null;
 
@@ -44,7 +49,7 @@
       document.getElementById("startBtn").disabled = true;
       try {
         client = new ProctorClient({
-          role: "mobile", sessionId,
+          role: "mobile", sessionId, token,
           video: document.getElementById("video"),
           overlay: document.getElementById("overlay"),
           onStatus: (s) => statusEl.textContent = s,

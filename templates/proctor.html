@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Proctor Dashboard</title>
   <link rel="stylesheet" href="/static/css/style.css" />
-  <script src="/static/js/vendor/qrcode.min.js"></script>
 </head>
 <body>
   <div class="topbar">
-    <div class="brand">Proctor Dashboard <small id="sidlbl"></small></div>
+    <div class="brand">Proctor · Candidate view <small id="sidlbl"></small></div>
     <div style="display:flex; gap:10px; align-items:center">
+      <a class="btn secondary" href="/dashboard">← All candidates</a>
       <span class="tag" id="cams"></span>
       <span class="pill" id="statepill" style="background:var(--panel2)">Connecting…</span>
     </div>
@@ -45,14 +45,8 @@
         </div>
 
         <div class="card">
-          <div class="section-title"><h3>Add secondary camera (phone)</h3><span class="tag" id="mobstatus">not connected</span></div>
-          <div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap">
-            <div id="qr" style="background:#fff; padding:8px; border-radius:10px; width:max-content"></div>
-            <div>
-              <p class="muted" style="margin:0 0 6px">Scan with the phone (same Wi-Fi) to join this exam as the secondary camera. Accept the one-time security warning, then tap <b>Start</b>.</p>
-              <p class="muted" id="murl" style="word-break:break-all; font-size:12px"></p>
-            </div>
-          </div>
+          <div class="section-title"><h3>Secondary camera (phone)</h3><span class="tag" id="mobstatus">not connected</span></div>
+          <p class="muted" style="margin:0">The candidate pairs their own phone from their exam page (Step 3 QR). When connected, its feed appears above and enables cross-camera confirmation.</p>
         </div>
       </div>
 
@@ -164,6 +158,7 @@
           <div class="kv"><span class="k">Identity</span><b>${d.identity_match === null ? "—" : (d.identity_match ? "match" : "MISMATCH")}${d.identity_distance!=null?" ("+d.identity_distance+")":""}</b></div>
           <div class="kv"><span class="k">Gaze / attention</span><b>${d.looking_away ? "looking " + d.gaze_direction : "on screen"}</b></div>
           <div class="kv"><span class="k">Eyes</span><b>${d.eyes_detected ? (d.eyes_closed ? "closed" : "open") + (d.eye_openness != null ? " (" + d.eye_openness + ")" : "") : "—"}</b></div>
+          <div class="kv"><span class="k">Hands</span><b>${d.hands_count != null ? d.hands_count : "—"}${d.hand_on_object ? " · on " + d.hand_object_class : ""}</b></div>
           <div class="kv"><span class="k">Objects</span><b>${fmtObjects(d.objects)}</b></div>
         </div>`);
       }
@@ -219,25 +214,6 @@
         ws.send(JSON.stringify({ type: "review", incident_id: id, action, note: "" }));
     }
 
-    async function makeQR(){
-      let ip = location.hostname, httpsPort = 8443;
-      try { const r = await fetch('/api/config'); const c = await r.json(); ip = c.lan_ip; httpsPort = c.https_port || 8443; } catch(e){}
-      const isLocal = ["localhost", "127.0.0.1", ""].includes(location.hostname);
-      let url;
-      if (!isLocal) {
-        url = `${location.origin}/mobile?session=${encodeURIComponent(sessionId)}`;
-      } else {
-        const port = location.protocol === "https:" ? location.port : httpsPort;
-        url = `https://${ip}:${port}/mobile?session=${encodeURIComponent(sessionId)}`;
-      }
-      document.getElementById("murl").textContent = url;
-      const box = document.getElementById("qr");
-      box.innerHTML = "";
-      if (window.QRCode) new QRCode(box, { text: url, width: 150, height: 150 });
-      else box.innerHTML = "<a href='"+url+"'>mobile link</a>";
-    }
-
-    makeQR();
     connect();
   </script>
 </body>

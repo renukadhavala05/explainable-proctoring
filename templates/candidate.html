@@ -5,14 +5,18 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Candidate · Exam Session</title>
   <link rel="stylesheet" href="/static/css/style.css" />
+  <script src="/static/js/vendor/qrcode.min.js"></script>
   <script src="/static/js/vendor/face-api.min.js"></script>
   <script type="module" src="/static/js/mp-setup.mjs"></script>
-  <script src="/static/js/detection.js?v=4"></script>
+  <script src="/static/js/detection.js?v=5"></script>
 </head>
 <body>
   <div class="topbar">
     <div class="brand">Candidate — Exam Session <small id="sidlbl"></small></div>
-    <span class="pill" id="statuspill" style="background:var(--panel2)">Idle</span>
+    <div style="display:flex; gap:10px; align-items:center">
+      <span class="pill" id="statuspill" style="background:var(--panel2)">Idle</span>
+      <button class="btn secondary" id="logout">Logout</button>
+    </div>
   </div>
 
   <div class="wrap">
@@ -39,41 +43,50 @@
 
       <div class="card">
         <h3>Step 2 · Start the exam</h3>
-        <p class="muted">Once enrolled, start the exam. Keep your face visible and eyes on the screen. Phones, books and other people will be flagged for the proctor to review.</p>
+        <p class="muted">Once enrolled, start the exam. Keep your face visible and eyes on the screen. Phones, books, hands on items and other people will be flagged for the proctor to review.</p>
         <button class="btn" id="startExamBtn" disabled>Start Exam</button>
         <button class="btn danger" id="endBtn" disabled>End Exam</button>
+      </div>
+
+      <div class="card">
+        <div class="section-title"><h3>Step 3 · Pair your phone (secondary camera)</h3><span class="tag" id="mobtag">optional</span></div>
+        <p class="muted">Scan this QR with your phone (same account/exam). It adds a second viewpoint of your desk. The code is unique to your session.</p>
+        <div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap">
+          <div id="qr" style="background:#fff; padding:8px; border-radius:10px; width:max-content"></div>
+          <p class="muted" id="murl" style="word-break:break-all; font-size:12px"></p>
+        </div>
       </div>
     </div>
   </div>
 
   <script>
     const params = new URLSearchParams(location.search);
-    const sessionId = params.get("session") || "exam-001";
+    const sessionId = params.get("session");
+    const token = params.get("token") || "";
+    if (!sessionId || !token) { location.href = "/login"; }
     document.getElementById("sidlbl").textContent = "· " + sessionId;
-    document.getElementById("sidlbl").parentElement;
 
     const video = document.getElementById("video");
     const overlay = document.getElementById("overlay");
     const statusEl = document.getElementById("status");
     const pill = document.getElementById("statuspill");
     const banner = document.getElementById("banner");
-
     let client = null;
 
     function setStatus(s){ statusEl.textContent = s; }
-    function setPill(txt, level){
-      pill.textContent = txt;
-      pill.className = "pill lvl-" + (level||"low");
-      pill.style.background = "var(--panel2)";
-    }
+    function setPill(txt, level){ pill.textContent = txt; pill.className = "pill lvl-" + (level||"low"); pill.style.background = "var(--panel2)"; }
+
+    document.getElementById("logout").onclick = async () => {
+      client && client.end();
+      await fetch("/api/logout", { method: "POST" });
+      location.href = "/login";
+    };
 
     document.getElementById("startCamBtn").onclick = async () => {
       try {
         client = new ProctorClient({
-          role: "candidate", sessionId, video, overlay,
-          onStatus: setStatus,
-          onSignals: () => {},
-          onServer: handleServer,
+          role: "candidate", sessionId, token, video, overlay,
+          onStatus: setStatus, onSignals: () => {}, onServer: handleServer,
         });
         await client.start();
         document.getElementById("captureBtn").disabled = false;
@@ -104,23 +117,36 @@
 
     document.getElementById("endBtn").onclick = () => {
       client && client.end();
-      setStatus("Exam ended.");
-      setPill("Ended");
+      setStatus("Exam ended."); setPill("Ended");
     };
 
     function handleServer(msg){
       if (msg.type === "warning") {
-        banner.style.display = "block";
-        banner.className = "banner warn";
+        banner.style.display = "block"; banner.className = "banner warn";
         banner.textContent = "⚠ " + msg.messages.join("  ·  ");
         setPill("Risk " + Math.round(msg.risk), msg.risk_level);
       } else if (msg.type === "ok") {
-        banner.className = "banner ok";
-        banner.style.display = "block";
+        banner.className = "banner ok"; banner.style.display = "block";
         banner.textContent = "All good — keep going.";
         setPill("Risk " + Math.round(msg.risk), msg.risk_level);
       }
     }
+
+    // phone pairing QR (uses this session's secure token)
+    async function makeQR(){
+      let ip = location.hostname, httpsPort = 8443;
+      try { const r = await fetch('/api/config'); const c = await r.json(); ip = c.lan_ip; httpsPort = c.https_port || 8443; } catch(e){}
+      const isLocal = ["localhost","127.0.0.1",""].includes(location.hostname);
+      let url;
+      if (!isLocal) url = `${location.origin}/mobile?session=${encodeURIComponent(sessionId)}&token=${encodeURIComponent(token)}`;
+      else { const port = location.protocol === "https:" ? location.port : httpsPort;
+             url = `https://${ip}:${port}/mobile?session=${encodeURIComponent(sessionId)}&token=${encodeURIComponent(token)}`; }
+      document.getElementById("murl").textContent = url;
+      const box = document.getElementById("qr"); box.innerHTML = "";
+      if (window.QRCode) new QRCode(box, { text: url, width: 170, height: 170 });
+      else box.innerHTML = "<a href='"+url+"'>mobile link</a>";
+    }
+    makeQR();
   </script>
 </body>
 </html>

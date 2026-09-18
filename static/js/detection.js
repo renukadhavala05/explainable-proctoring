@@ -16,7 +16,16 @@ const OBJECT_CLASSES = ["cell phone", "book", "laptop", "tv", "remote", "keyboar
 
 let faceOpts = null;
 let objModel = null;          // MediaPipe ObjectDetector (WASM, independent of tfjs)
+let handModel = null;         // MediaPipe HandLandmarker (hands + hand-object interaction)
 let modelsLoaded = false;
+
+const INTERACT_CLASSES = ["cell phone", "book", "remote"];  // objects that matter if a hand is on them
+
+function rectsOverlap(a, b) {
+  const ix = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x));
+  const iy = Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+  return ix * iy;
+}
 
 function waitFor(cond, timeout = 20000, label = "dependency") {
   return new Promise((resolve, reject) => {
@@ -50,6 +59,14 @@ async function loadModels(onStatus) {
   onStatus && onStatus("Loading object model…");
   await step("wait for MediaPipe module", () => waitFor(() => window.MediaPipeObjects, 20000, "MediaPipe module"));
   objModel = await step("create MediaPipe object detector", () => window.MediaPipeObjects.create());
+
+  onStatus && onStatus("Loading hand model…");
+  try {
+    handModel = await window.MediaPipeObjects.createHands();
+  } catch (e) {
+    console.warn("[detection] hand model unavailable, continuing without it:", e);
+    handModel = null;
+  }
 
   modelsLoaded = true;
   onStatus && onStatus("Models ready");
@@ -118,13 +135,16 @@ class ProctorClient {
     this.onStatus = opts.onStatus || (() => {});
 
     this.enrolledDescriptor = opts.enrolledDescriptor || null;
+    this.token = opts.token || "";
     this.facingMode = opts.facingMode || (this.role === "mobile" ? "environment" : "user");
     this.stream = null;
     this.lastObjects = [];
+    this.lastHands = [];
     this.ws = null;
     this.running = false;
     this._objTick = 0;
     this._lastObjTs = 0;
+    this._lastHandTs = 0;
   }
 
   async start() {
@@ -166,7 +186,8 @@ class ProctorClient {
 
   _connect() {
     const proto = location.protocol === "https:" ? "wss" : "ws";
-    this.ws = new WebSocket(`${proto}://${location.host}/ws/${this.role}/${this.sessionId}`);
+    const q = this.token ? `?token=${encodeURIComponent(this.token)}` : "";
+    this.ws = new WebSocket(`${proto}://${location.host}/ws/${this.role}/${this.sessionId}${q}`);
     this.ws.onmessage = (e) => this.onServer(JSON.parse(e.data));
     this.ws.onclose = () => {
       if (this.running) setTimeout(() => this._connect(), 1500);
@@ -206,13 +227,16 @@ class ProctorClient {
   }
 
   async _detectOnce() {
+    const vw = this.video.videoWidth || 640;
+    const vh = this.video.videoHeight || 480;
+
     // faces + landmarks + descriptors
     const faces = await faceapi
       .detectAllFaces(this.video, faceOpts)
       .withFaceLandmarks()
       .withFaceDescriptors();
 
-    // objects every other tick (cheaper) -- MediaPipe ObjectDetector (WASM)
+    // objects + hands every other tick (cheaper) -- MediaPipe (WASM)
     this._objTick = (this._objTick + 1) % 2;
     if (this._objTick === 0 && objModel) {
       let ts = performance.now();
@@ -227,10 +251,30 @@ class ProctorClient {
                    bbox: [bb.originX, bb.originY, bb.width, bb.height] };
         })
         .filter((o) => OBJECT_CLASSES.includes(o.class) && o.score > 0.4);
+
+      if (handModel) {
+        let hts = performance.now();
+        if (hts <= this._lastHandTs) hts = this._lastHandTs + 1;
+        this._lastHandTs = hts;
+        const hres = handModel.detectForVideo(this.video, hts);
+        this.lastHands = (hres.landmarks || []).map((lm) => {
+          let minx = 1, miny = 1, maxx = 0, maxy = 0;
+          lm.forEach((p) => { minx = Math.min(minx, p.x); miny = Math.min(miny, p.y); maxx = Math.max(maxx, p.x); maxy = Math.max(maxy, p.y); });
+          return { x: minx * vw, y: miny * vh, w: (maxx - minx) * vw, h: (maxy - miny) * vh };
+        });
+      }
     }
 
-    const vw = this.video.videoWidth || 640;
-    const vh = this.video.videoHeight || 480;
+    // hand - object interaction: is a hand overlapping a phone/book?
+    let handOnObject = false, handObjectClass = null;
+    for (const o of this.lastObjects) {
+      if (!INTERACT_CLASSES.includes(o.class)) continue;
+      const ob = { x: o.bbox[0], y: o.bbox[1], w: o.bbox[2], h: o.bbox[3] };
+      for (const h of this.lastHands) {
+        if (rectsOverlap(h, ob) > 0.02 * (ob.w * ob.h)) { handOnObject = true; handObjectClass = o.class; break; }
+      }
+      if (handOnObject) break;
+    }
 
     let signals = {
       face_present: faces.length > 0,
@@ -244,6 +288,9 @@ class ProctorClient {
       eyes_detected: false,
       eyes_closed: false,
       eye_openness: null,
+      hands_count: this.lastHands.length,
+      hand_on_object: handOnObject,
+      hand_object_class: handObjectClass,
       objects: this.lastObjects.map((o) => ({ class: o.class, score: o.score })),
       person_count: this.lastObjects.filter((o) => o.class === "person").length,
       face_area: 0,
@@ -324,6 +371,15 @@ class ProctorClient {
       ctx.fillStyle = "#f39c12";
       ctx.fillText(`${o.class} ${o.score}`, x, y - 6);
     });
+    // draw detected hands
+    ctx.lineWidth = 2;
+    this.lastHands.forEach((h) => {
+      ctx.strokeStyle = "#9b59b6";
+      ctx.strokeRect(h.x, h.y, h.w, h.h);
+      ctx.fillStyle = "#9b59b6";
+      ctx.fillText("hand", h.x, h.y - 6);
+    });
+    ctx.lineWidth = 3;
   }
 
   async _frameLoop() {

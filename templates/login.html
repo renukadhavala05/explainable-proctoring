@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Login · Explainable Proctoring</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">Explainable AI Proctoring <small>Human-in-the-loop online exam monitoring</small></div>
+  </div>
+
+  <div class="wrap" style="max-width:460px">
+    <div class="card" style="margin-top:40px">
+      <div style="display:flex; gap:8px; margin-bottom:18px">
+        <button class="btn" id="tabCandidate" style="flex:1">Candidate</button>
+        <button class="btn secondary" id="tabProctor" style="flex:1">Proctor</button>
+      </div>
+
+      <h3 id="formTitle">Candidate login</h3>
+      <p class="muted" id="formHint">Enter your details to start your exam. First login creates your account.</p>
+
+      <div class="grid" style="gap:10px; margin-top:12px">
+        <div id="nameRow">
+          <label class="muted">Full name</label>
+          <input type="text" id="name" placeholder="e.g. Renuka D" style="width:100%" />
+        </div>
+        <div>
+          <label class="muted" id="userLabel">Roll number / ID</label>
+          <input type="text" id="username" placeholder="e.g. 21CS042" style="width:100%" />
+        </div>
+        <div>
+          <label class="muted">Password</label>
+          <input type="password" id="password" placeholder="Password" style="width:100%" />
+        </div>
+        <button class="btn" id="submitBtn" style="margin-top:6px">Login &amp; start</button>
+        <div id="err" class="banner warn" style="display:none"></div>
+      </div>
+
+      <p class="muted" style="margin-top:14px; font-size:12px" id="proctorHelp" >
+        Proctor demo account: <b>admin / admin123</b>
+      </p>
+    </div>
+  </div>
+
+  <script>
+    let role = "candidate";
+    const $ = (id) => document.getElementById(id);
+
+    function setRole(r) {
+      role = r;
+      const cand = r === "candidate";
+      $("tabCandidate").className = "btn" + (cand ? "" : " secondary");
+      $("tabProctor").className = "btn" + (cand ? " secondary" : "");
+      $("formTitle").textContent = cand ? "Candidate login" : "Proctor login";
+      $("formHint").textContent = cand
+        ? "Enter your details to start your exam. First login creates your account."
+        : "Sign in to monitor all live candidates.";
+      $("nameRow").style.display = cand ? "block" : "none";
+      $("userLabel").textContent = cand ? "Roll number / ID" : "Username";
+      $("username").placeholder = cand ? "e.g. 21CS042" : "admin";
+      $("submitBtn").textContent = cand ? "Login & start" : "Sign in";
+      $("proctorHelp").style.display = cand ? "none" : "block";
+      $("err").style.display = "none";
+    }
+
+    $("tabCandidate").onclick = () => setRole("candidate");
+    $("tabProctor").onclick = () => setRole("proctor");
+
+    async function submit() {
+      const body = {
+        role,
+        username: $("username").value.trim(),
+        password: $("password").value,
+        name: $("name").value.trim(),
+      };
+      $("submitBtn").disabled = true;
+      try {
+        const r = await fetch("/api/login", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await r.json();
+        if (!r.ok) { throw new Error(data.error || "Login failed"); }
+        location.href = data.redirect;
+      } catch (e) {
+        $("err").textContent = e.message;
+        $("err").style.display = "block";
+        $("submitBtn").disabled = false;
+      }
+    }
+    $("submitBtn").onclick = submit;
+    $("password").addEventListener("keydown", (e) => { if (e.key === "Enter") submit(); });
+    setRole("candidate");
+  </script>
+</body>
+</html>

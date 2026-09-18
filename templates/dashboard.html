@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Proctor · All candidates</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">Proctor Dashboard <small>All live candidates</small></div>
+    <div style="display:flex; gap:10px; align-items:center">
+      <span class="tag" id="who"></span>
+      <button class="btn secondary" id="logout">Logout</button>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div class="card">
+      <div class="section-title">
+        <h3>Live exam sessions</h3>
+        <span class="tag">auto-refreshes every 2s</span>
+      </div>
+      <div id="list"><p class="muted">Loading… (candidates appear here as they log in and start their exam)</p></div>
+    </div>
+  </div>
+
+  <script>
+    async function refresh() {
+      try {
+        const r = await fetch("/api/active");
+        if (r.status === 401) { location.href = "/login"; return; }
+        const rows = await r.json();
+        const box = document.getElementById("list");
+        if (!rows.length) {
+          box.innerHTML = "<p class='muted'>No active sessions yet. Ask candidates to log in and start their exam.</p>";
+          return;
+        }
+        box.innerHTML = `<div style="display:grid; gap:10px">` + rows.map(s => {
+          const cams = [];
+          if (s.cameras_online.candidate) cams.push("laptop ✓");
+          if (s.cameras_online.mobile) cams.push("mobile ✓");
+          return `<a href="/proctor?session=${encodeURIComponent(s.sid)}" style="text-decoration:none">
+            <div class="incident" style="display:flex; justify-content:space-between; align-items:center">
+              <div>
+                <div class="title" style="color:var(--text)">${s.candidate} <span class="tag">(${s.sid})</span></div>
+                <div class="tag">${cams.join("  ·  ") || "no camera yet"} · ${s.active_incidents} active incident(s)</div>
+              </div>
+              <div style="text-align:right">
+                <div class="num lvl-${s.risk_level}" style="font-size:34px; font-weight:800">${Math.round(s.risk)}</div>
+                <div class="tag lvl-${s.risk_level}" style="text-transform:uppercase">${s.risk_level}</div>
+              </div>
+            </div></a>`;
+        }).join("") + `</div>`;
+      } catch (e) { /* keep trying */ }
+    }
+
+    document.getElementById("logout").onclick = async () => {
+      await fetch("/api/logout", { method: "POST" });
+      location.href = "/login";
+    };
+    fetch("/api/me").then(r => r.json()).then(u => {
+      document.getElementById("who").textContent = u.name ? ("Signed in as " + u.name) : "";
+    });
+    refresh();
+    setInterval(refresh, 2000);
+  </script>
+</body>
+</html>

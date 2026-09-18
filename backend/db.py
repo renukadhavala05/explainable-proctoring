@@ -8,6 +8,8 @@ so a proctor can review the history and evidence after the exam.
 import sqlite3
 import json
 import os
+import hashlib
+import secrets
 import threading
 import time
 
@@ -38,6 +40,15 @@ def init_db():
                 incident_count INTEGER DEFAULT 0
             );
 
+            CREATE TABLE IF NOT EXISTS users (
+                username   TEXT PRIMARY KEY,
+                role       TEXT,
+                name       TEXT,
+                pw_salt    TEXT,
+                pw_hash    TEXT,
+                created_at REAL
+            );
+
             CREATE TABLE IF NOT EXISTS incidents (
                 id            TEXT PRIMARY KEY,
                 session_id    TEXT,
@@ -61,6 +72,46 @@ def init_db():
             );
             """
         )
+
+
+# ---------------------------------------------------------------------------
+# Users / authentication (stdlib pbkdf2 hashing -- no extra dependency)
+# ---------------------------------------------------------------------------
+def _hash_pw(password, salt=None):
+    salt = salt or secrets.token_hex(16)
+    h = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 100_000).hex()
+    return salt, h
+
+
+def create_user(username, password, role, name=None):
+    salt, h = _hash_pw(password)
+    with _lock, _connect() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO users (username, role, name, pw_salt, pw_hash, created_at) VALUES (?,?,?,?,?,?)",
+            (username, role, name or username, salt, h, time.time()),
+        )
+
+
+def get_user(username):
+    with _lock, _connect() as conn:
+        row = conn.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
+        return dict(row) if row else None
+
+
+def verify_user(username, password):
+    u = get_user(username)
+    if not u:
+        return None
+    _, h = _hash_pw(password, u["pw_salt"])
+    if secrets.compare_digest(h, u["pw_hash"]):
+        return u
+    return None
+
+
+def ensure_proctor(username, password):
+    """Seed a default proctor account if it does not exist yet."""
+    if not get_user(username):
+        create_user(username, password, "proctor", name="Proctor")
 
 
 def upsert_session(session_id, candidate=None, enrolled=None):
