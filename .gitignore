@@ -1,0 +1,9 @@
+venv/
+__pycache__/
+*.pyc
+data/*.db
+evidence/*
+!evidence/.gitkeep
+certs/*.pem
+cloudflared.exe
+*.bak*

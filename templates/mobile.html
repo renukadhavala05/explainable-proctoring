@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mobile Secondary Camera</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+  <script src="/static/js/vendor/face-api.min.js"></script>
+  <script type="module" src="/static/js/mp-setup.mjs"></script>
+  <script src="/static/js/detection.js?v=4"></script>
+</head>
+<body class="mobile">
+  <div class="topbar">
+    <div class="brand">Mobile Secondary Camera <small id="sidlbl"></small></div>
+    <span class="pill" id="pill" style="background:var(--panel2)">Idle</span>
+  </div>
+
+  <div class="wrap">
+    <div class="card" style="max-width:640px;margin:0 auto">
+      <h3>Secondary viewpoint</h3>
+      <p class="muted">Place the phone to the side so it can see your desk and surroundings. Tap start and allow the camera. This adds a second angle for cross-camera confirmation.</p>
+      <div style="display:flex; gap:10px">
+        <button class="btn" id="startBtn" style="flex:1">Start secondary camera</button>
+        <button class="btn secondary" id="flipBtn" disabled>🔄 Flip camera</button>
+      </div>
+      <div class="status-line" id="status" style="margin-top:12px">Ready.</div>
+      <div class="videowrap" style="margin-top:10px">
+        <video id="video" autoplay muted playsinline></video>
+        <canvas id="overlay"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const sessionId = params.get("session") || "exam-001";
+    document.getElementById("sidlbl").textContent = "· " + sessionId;
+    const statusEl = document.getElementById("status");
+    const pill = document.getElementById("pill");
+
+    let client = null;
+
+    document.getElementById("startBtn").onclick = async () => {
+      document.getElementById("startBtn").disabled = true;
+      try {
+        client = new ProctorClient({
+          role: "mobile", sessionId,
+          video: document.getElementById("video"),
+          overlay: document.getElementById("overlay"),
+          onStatus: (s) => statusEl.textContent = s,
+        });
+        await client.start();
+        pill.textContent = "Streaming";
+        statusEl.textContent = "Secondary camera streaming to the proctor.";
+        document.getElementById("flipBtn").disabled = false;
+      } catch (e) {
+        statusEl.textContent = "Camera error: " + e.message + ". On a phone this page must be opened over HTTPS.";
+        document.getElementById("startBtn").disabled = false;
+      }
+    };
+
+    document.getElementById("flipBtn").onclick = async () => {
+      if (!client) return;
+      const btn = document.getElementById("flipBtn");
+      btn.disabled = true;
+      try {
+        const mode = await client.flipCamera();
+        statusEl.textContent = "Switched to " + (mode === "environment" ? "rear" : "front") + " camera.";
+      } catch (e) {
+        statusEl.textContent = "Could not switch camera: " + e.message;
+      }
+      btn.disabled = false;
+    };
+  </script>
+</body>
+</html>

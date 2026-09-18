@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Diagnostics</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+  <script src="/static/js/vendor/face-api.min.js"></script>
+  <script type="module" src="/static/js/mp-setup.mjs"></script>
+</head>
+<body>
+  <div class="topbar"><div class="brand">System Diagnostics</div></div>
+  <div class="wrap">
+    <div class="card">
+      <p class="muted">Checks each part of the AI pipeline separately. face-api runs on its own bundled TF; MediaPipe runs on WebAssembly — no shared runtime.</p>
+      <button class="btn" id="run">Run diagnostics</button>
+      <button class="btn secondary" id="cam">Test camera only</button>
+      <div id="log" style="margin-top:16px; font-family:ui-monospace,monospace; font-size:13px; line-height:1.8"></div>
+    </div>
+  </div>
+  <script>
+    const log = document.getElementById("log");
+    function line(ok, label, extra) {
+      const color = ok === true ? "#2ecc71" : ok === false ? "#e74c3c" : "#93a0bd";
+      const mark = ok === true ? "PASS" : ok === false ? "FAIL" : "····";
+      log.innerHTML += `<div style="color:${color}">[${mark}] ${label}${extra ? " — " + extra : ""}</div>`;
+    }
+
+    async function run() {
+      log.innerHTML = "";
+      line(null, "Secure context (needed for camera): " + window.isSecureContext);
+      line(typeof faceapi !== "undefined", "face-api.js global present");
+      line(!!window.MediaPipeObjects, "MediaPipe module loaded");
+      line(!!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia), "getUserMedia available");
+
+      const M = "/static/models";
+      try { await faceapi.nets.tinyFaceDetector.loadFromUri(M); line(true, "load tinyFaceDetector"); }
+      catch (e) { line(false, "load tinyFaceDetector", e.message); console.error(e); }
+      try { await faceapi.nets.faceLandmark68Net.loadFromUri(M); line(true, "load faceLandmark68Net"); }
+      catch (e) { line(false, "load faceLandmark68Net", e.message); console.error(e); }
+      try { await faceapi.nets.faceRecognitionNet.loadFromUri(M); line(true, "load faceRecognitionNet"); }
+      catch (e) { line(false, "load faceRecognitionNet", e.message); console.error(e); }
+
+      // face-api INFERENCE test (this is where the old conflict crashed)
+      try {
+        const c = document.createElement("canvas"); c.width = 224; c.height = 224;
+        const opts = new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 });
+        await faceapi.detectAllFaces(c, opts).withFaceLandmarks().withFaceDescriptors();
+        line(true, "face-api inference runs (no TF conflict)");
+      } catch (e) { line(false, "face-api inference", e.message); console.error(e); }
+
+      // MediaPipe object detector
+      try {
+        if (!window.MediaPipeObjects) throw new Error("MediaPipe module not loaded");
+        const det = await window.MediaPipeObjects.create();
+        line(true, "create MediaPipe object detector");
+        const c = document.createElement("canvas"); c.width = 320; c.height = 240;
+        const r = det.detectForVideo(c, performance.now());
+        line(true, "MediaPipe inference runs", (r.detections ? r.detections.length : 0) + " detections on blank frame");
+      } catch (e) { line(false, "MediaPipe object detector", e.message); console.error(e); }
+
+      line(null, "Done. All PASS = the demo will work. FAIL lines show the cause (stacks in console F12).");
+    }
+
+    async function testCam() {
+      try {
+        const s = await navigator.mediaDevices.getUserMedia({ video: true });
+        line(true, "camera acquired (" + s.getVideoTracks().length + " track)");
+        s.getTracks().forEach(t => t.stop());
+      } catch (e) { line(false, "getUserMedia", e.name + ": " + e.message); }
+    }
+
+    document.getElementById("run").onclick = run;
+    document.getElementById("cam").onclick = testCam;
+  </script>
+</body>
+</html>

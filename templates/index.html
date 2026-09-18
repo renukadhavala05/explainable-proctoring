@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Explainable AI Proctoring System</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+  <script src="/static/js/vendor/qrcode.min.js"></script>
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">Explainable AI Proctoring <small>Final Year Project · Human-in-the-loop online exam monitoring</small></div>
+    <span class="pill" style="background:var(--panel2)">Demo</span>
+  </div>
+
+  <div class="wrap">
+    <div class="hero">
+      <h1>Explainable, Human-in-the-Loop Online Exam Proctoring</h1>
+      <p class="muted">Laptop (primary) + mobile (secondary) cameras · temporal reasoning · cross-camera correlation · explainable risk — <b>not</b> a black-box cheating alarm.</p>
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <h3>Start the demo (two browser tabs on this laptop)</h3>
+      <p class="muted">Use the same Session ID for both tabs so they connect to the same exam.</p>
+      <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap">
+        <label class="muted">Session ID</label>
+        <input type="text" id="sid" value="exam-001" />
+        <button class="btn" onclick="go('candidate')">Open Candidate (Exam)</button>
+        <button class="btn secondary" onclick="go('proctor')">Open Proctor Dashboard</button>
+      </div>
+      <p class="muted" style="margin-top:10px">Tip: open the <b>Candidate</b> tab, enroll your face, start the exam — then open the <b>Proctor</b> tab to watch the analysis live. Try holding up a phone or looking away to see incidents build up.</p>
+    </div>
+
+    <div class="cardrow">
+      <div class="card">
+        <h3>1 · Detect</h3>
+        <p class="muted">In-browser AI: face verification, multi-face detection, head-pose / gaze, and object detection (phone, book, extra person).</p>
+      </div>
+      <div class="card">
+        <h3>2 · Reason over time</h3>
+        <p class="muted">A single frame is never "cheating". Signals are correlated across a sliding window into <b>contextual incidents</b> with confidence.</p>
+      </div>
+      <div class="card">
+        <h3>3 · Cross-camera</h3>
+        <p class="muted">When laptop + mobile independently agree, an incident is <b>cross-camera confirmed</b> and trusted more.</p>
+      </div>
+      <div class="card">
+        <h3>4 · Explain &amp; review</h3>
+        <p class="muted">The proctor sees feeds, contributing signals, evidence and a timeline — and makes the final decision.</p>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <h3>Add the mobile secondary camera (real trial — later)</h3>
+      <p class="muted">On your phone (same Wi-Fi), open the URL below and allow the camera. Requires running the server with HTTPS (see README). The QR encodes the mobile page for Session <b id="qsid">exam-001</b>.</p>
+      <div id="qr" style="background:#fff;padding:10px;border-radius:10px;width:max-content"></div>
+      <p class="muted" id="murl" style="margin-top:8px"></p>
+      <div id="qrwarn" class="banner warn" style="display:none">
+        You are viewing this over http. The QR points to the HTTPS address for the phone.
+        Start the server with <b>start_https.bat</b> and, on the phone, tap <b>Advanced → proceed</b> to accept the one-time security warning.
+      </div>
+      <ol class="muted" style="margin-top:8px; font-size:13px; line-height:1.7">
+        <li>Make sure the phone is on the <b>same Wi-Fi</b> as this laptop.</li>
+        <li>Scan the QR (or type the URL). Accept the security warning once.</li>
+        <li>Tap <b>Start secondary camera</b> and allow camera access.</li>
+        <li>Open the <b>Proctor</b> dashboard — the mobile feed and cross-camera incidents appear.</li>
+      </ol>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <h3>System architecture</h3>
+      <div class="flow" id="flow"></div>
+    </div>
+  </div>
+
+  <script>
+    const sidInput = document.getElementById("sid");
+    function go(role){ location.href = `/${role}?session=${encodeURIComponent(sidInput.value||"exam-001")}`; }
+
+    const flow = `ONLINE EXAM SESSION
+   ┌───────────┴───────────┐
+LAPTOP CAMERA          MOBILE CAMERA
+(primary view)         (secondary view)
+   │                       │
+ Face · Gaze · Pose     Objects · People · Behavior
+   └───────────┬───────────┘
+        TEMPORAL REASONING (sliding window)
+        CROSS-CAMERA CORRELATION
+        CONTEXTUAL INCIDENTS
+        EXPLAINABLE RISK ENGINE
+        EVIDENCE + TIMELINE
+        PROCTOR REVIEW (human decides)`;
+    document.getElementById("flow").textContent = flow;
+
+    async function makeQR(){
+      let ip = location.hostname, httpsPort = 8443;
+      try { const r = await fetch('/api/config'); const c = await r.json(); ip = c.lan_ip; httpsPort = c.https_port || 8443; } catch(e){}
+      const sid = sidInput.value || "exam-001";
+      document.getElementById("qsid").textContent = sid;
+      // If served from a public host (tunnel / cloud), reuse this page's origin.
+      // Only fall back to the LAN IP + https port when running locally on localhost.
+      const isLocal = ["localhost", "127.0.0.1", ""].includes(location.hostname);
+      const onHttps = location.protocol === "https:";
+      let url;
+      if (!isLocal) {
+        url = `${location.origin}/mobile?session=${encodeURIComponent(sid)}`;
+      } else {
+        const port = onHttps ? location.port : httpsPort;
+        url = `https://${ip}:${port}/mobile?session=${encodeURIComponent(sid)}`;
+      }
+      document.getElementById("murl").textContent = url;
+      const box = document.getElementById("qr");
+      box.innerHTML = "";
+      new QRCode(box, { text: url, width: 220, height: 220 });
+      const warn = document.getElementById("qrwarn");
+      if (warn) warn.style.display = onHttps ? "none" : "block";
+    }
+    sidInput.addEventListener("input", makeQR);
+    makeQR();
+  </script>
+</body>
+</html>

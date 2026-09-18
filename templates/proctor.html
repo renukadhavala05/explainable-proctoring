@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Proctor Dashboard</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+  <script src="/static/js/vendor/qrcode.min.js"></script>
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">Proctor Dashboard <small id="sidlbl"></small></div>
+    <div style="display:flex; gap:10px; align-items:center">
+      <span class="tag" id="cams"></span>
+      <span class="pill" id="statepill" style="background:var(--panel2)">Connecting…</span>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div class="dash">
+      <!-- LEFT: feeds + risk -->
+      <div class="grid">
+        <div class="card">
+          <div class="section-title"><h3>Live camera feeds</h3><span class="tag">primary (laptop) + secondary (mobile)</span></div>
+          <div class="feeds">
+            <div class="feed"><span class="label">Laptop (primary)</span><img id="feed-candidate" /><div class="offline" id="off-candidate">waiting…</div></div>
+            <div class="feed"><span class="label">Mobile (secondary)</span><img id="feed-mobile" /><div class="offline" id="off-mobile">not connected</div></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="section-title"><h3>Explainable risk</h3><span class="tag">smoothed · decays over time</span></div>
+          <div class="gauge">
+            <div class="num" id="riskNum">0</div>
+            <div class="lvl-low" id="riskLvl" style="font-weight:700; text-transform:uppercase; letter-spacing:1px">low</div>
+            <div class="bar"><div id="riskBar" class="bg-low" style="width:0%"></div></div>
+            <div class="tag">peak this session: <span id="peak">0</span></div>
+          </div>
+          <div id="breakdown"></div>
+        </div>
+
+        <div class="card">
+          <div class="section-title"><h3>Live signals</h3><span class="tag">raw per-camera observations</span></div>
+          <div id="signals"></div>
+        </div>
+
+        <div class="card">
+          <div class="section-title"><h3>Add secondary camera (phone)</h3><span class="tag" id="mobstatus">not connected</span></div>
+          <div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap">
+            <div id="qr" style="background:#fff; padding:8px; border-radius:10px; width:max-content"></div>
+            <div>
+              <p class="muted" style="margin:0 0 6px">Scan with the phone (same Wi-Fi) to join this exam as the secondary camera. Accept the one-time security warning, then tap <b>Start</b>.</p>
+              <p class="muted" id="murl" style="word-break:break-all; font-size:12px"></p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT: incidents + timeline -->
+      <div class="grid">
+        <div class="card">
+          <div class="section-title"><h3>Active incidents</h3><span class="tag" id="incCount">0</span></div>
+          <div class="scroll" id="incidents"><p class="muted">No active incidents. This is normal behaviour.</p></div>
+        </div>
+
+        <div class="card">
+          <div class="section-title"><h3>Incident timeline</h3><span class="tag">most recent first</span></div>
+          <div class="scroll timeline" id="timeline"><p class="muted">No events yet.</p></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const sessionId = params.get("session") || "exam-001";
+    document.getElementById("sidlbl").textContent = "· " + sessionId;
+
+    const sevIcon = { high: "#e74c3c", medium: "#e67e22", low: "#f1c40f" };
+    let ws;
+
+    function connect(){
+      const proto = location.protocol === "https:" ? "wss" : "ws";
+      ws = new WebSocket(`${proto}://${location.host}/ws/proctor/${sessionId}`);
+      ws.onopen = () => setPill("Live", "low");
+      ws.onmessage = (e) => onMsg(JSON.parse(e.data));
+      ws.onclose = () => { setPill("Reconnecting…"); setTimeout(connect, 1500); };
+    }
+
+    function setPill(txt, level){
+      const p = document.getElementById("statepill");
+      p.textContent = txt;
+      p.style.background = "var(--panel2)";
+      if (level) p.className = "pill lvl-" + level; else p.className = "pill";
+    }
+
+    function onMsg(msg){
+      if (msg.type === "frame") return showFrame(msg);
+      if (msg.type === "enrolled") return;
+      if (msg.type === "state") return render(msg);
+    }
+
+    function showFrame(msg){
+      const img = document.getElementById("feed-" + msg.camera);
+      const off = document.getElementById("off-" + msg.camera);
+      if (img){ img.src = msg.image; if (off) off.style.display = "none"; }
+    }
+
+    function render(s){
+      // risk gauge
+      document.getElementById("riskNum").textContent = Math.round(s.risk);
+      document.getElementById("riskNum").className = "num lvl-" + s.risk_level;
+      const lvl = document.getElementById("riskLvl");
+      lvl.textContent = s.risk_level; lvl.className = "lvl-" + s.risk_level;
+      const bar = document.getElementById("riskBar");
+      bar.style.width = s.risk + "%"; bar.className = "bg-" + s.risk_level;
+      document.getElementById("peak").textContent = Math.round(s.max_risk);
+      setPill("Live · risk " + Math.round(s.risk), s.risk_level);
+
+      // cameras online
+      const cams = [];
+      if (s.cameras_online.candidate) cams.push("laptop ✓");
+      if (s.cameras_online.mobile) cams.push("mobile ✓");
+      document.getElementById("cams").textContent = cams.join("  ·  ");
+      if (!s.cameras_online.mobile) document.getElementById("off-mobile").style.display = "grid";
+      if (!s.cameras_online.candidate) document.getElementById("off-candidate").style.display = "grid";
+      const ms = document.getElementById("mobstatus");
+      if (ms){ ms.textContent = s.cameras_online.mobile ? "connected ✓" : "not connected";
+               ms.className = "tag lvl-" + (s.cameras_online.mobile ? "low" : ""); }
+
+      // risk breakdown
+      const bd = document.getElementById("breakdown");
+      if (s.risk_breakdown.length){
+        bd.innerHTML = "<div class='tag' style='margin:10px 0 6px'>What is driving the risk:</div>" +
+          s.risk_breakdown.map(b =>
+            `<div class="kv"><span class="k">${b.title}${b.cross_camera ? " <span class='xcam'>2-cam</span>":""}</span><b>+${b.contribution}</b></div>`
+          ).join("");
+      } else bd.innerHTML = "<div class='tag' style='margin-top:10px'>Nothing contributing — behaviour looks normal.</div>";
+
+      // live signals
+      renderSignals(s.latest_signals);
+
+      // incidents
+      renderIncidents(s.active_incidents);
+
+      // timeline
+      renderTimeline(s.timeline);
+    }
+
+    function fmtObjects(objs){
+      if (!objs || !objs.length) return "none";
+      return objs.map(o => `${o.class} (${o.score})`).join(", ");
+    }
+
+    function renderSignals(sig){
+      const parts = [];
+      for (const cam of ["candidate", "mobile"]){
+        const d = sig[cam];
+        if (!d) continue;
+        parts.push(`<div style="margin-bottom:8px">
+          <div class="tag" style="text-transform:uppercase">${cam === "candidate" ? "laptop" : "mobile"}</div>
+          <div class="kv"><span class="k">Face present</span><b>${d.face_present ? "yes" : "NO"}</b></div>
+          <div class="kv"><span class="k">Faces / people</span><b>${d.face_count} / ${d.person_count}</b></div>
+          <div class="kv"><span class="k">Identity</span><b>${d.identity_match === null ? "—" : (d.identity_match ? "match" : "MISMATCH")}${d.identity_distance!=null?" ("+d.identity_distance+")":""}</b></div>
+          <div class="kv"><span class="k">Gaze / attention</span><b>${d.looking_away ? "looking " + d.gaze_direction : "on screen"}</b></div>
+          <div class="kv"><span class="k">Eyes</span><b>${d.eyes_detected ? (d.eyes_closed ? "closed" : "open") + (d.eye_openness != null ? " (" + d.eye_openness + ")" : "") : "—"}</b></div>
+          <div class="kv"><span class="k">Objects</span><b>${fmtObjects(d.objects)}</b></div>
+        </div>`);
+      }
+      document.getElementById("signals").innerHTML = parts.join("") || "<p class='muted'>No signals yet.</p>";
+    }
+
+    function renderIncidents(list){
+      document.getElementById("incCount").textContent = list.length;
+      const box = document.getElementById("incidents");
+      if (!list.length){ box.innerHTML = "<p class='muted'>No active incidents. This is normal behaviour.</p>"; return; }
+      box.innerHTML = list.map(inc => {
+        const reviewed = inc.review && inc.review.action;
+        const ev = (inc.evidence || []).map(u => `<img src="${u}" onclick="window.open('${u}')" />`).join("");
+        const sigs = (inc.contributing_signals || []).map(x => `<li>${x}</li>`).join("");
+        return `<div class="incident ${reviewed ? "reviewed" : ""}">
+          <div class="head">
+            <span class="title">${inc.title} ${inc.cross_camera ? "<span class='xcam'>cross-camera confirmed</span>" : ""}</span>
+            <span class="sev ${inc.severity}">${inc.severity}</span>
+          </div>
+          <div class="expl">${inc.explanation}</div>
+          <div class="tag">Contributing signals:</div>
+          <ul>${sigs}</ul>
+          <div class="tag">Confidence ${Math.round(inc.confidence*100)}% · duration ${inc.duration}s · cameras: ${inc.cameras.join(", ")}</div>
+          <div class="confbar"><div style="width:${Math.round(inc.confidence*100)}%"></div></div>
+          ${ev ? `<div class="evidence" style="margin-top:8px">${ev}</div>` : ""}
+          <div class="actions">
+            <button class="btn danger" onclick="review('${inc.id}','confirmed')">Confirm concern</button>
+            <button class="btn secondary" onclick="review('${inc.id}','dismissed')">Dismiss</button>
+            ${reviewed ? `<span class="tag" style="align-self:center">reviewed: ${inc.review.action}</span>` : ""}
+          </div>
+        </div>`;
+      }).join("");
+    }
+
+    function renderTimeline(items){
+      const box = document.getElementById("timeline");
+      if (!items || !items.length){ box.innerHTML = "<p class='muted'>No events yet.</p>"; return; }
+      const rows = [...items].reverse().map(inc => {
+        const t = new Date(inc.start_ts * 1000).toLocaleTimeString();
+        return `<div class="item">
+          <div class="dot" style="background:${sevIcon[inc.severity]||"#888"}"></div>
+          <div>
+            <div><b>${inc.title}</b> ${inc.cross_camera ? "<span class='xcam'>2-cam</span>" : ""} <span class="tag">${inc.status}</span></div>
+            <div class="tag">${t} · ${inc.duration}s · confidence ${Math.round(inc.confidence*100)}%${inc.review && inc.review.action ? " · reviewed: "+inc.review.action : ""}</div>
+          </div>
+        </div>`;
+      }).join("");
+      box.innerHTML = rows;
+    }
+
+    function review(id, action){
+      if (ws && ws.readyState === WebSocket.OPEN)
+        ws.send(JSON.stringify({ type: "review", incident_id: id, action, note: "" }));
+    }
+
+    async function makeQR(){
+      let ip = location.hostname, httpsPort = 8443;
+      try { const r = await fetch('/api/config'); const c = await r.json(); ip = c.lan_ip; httpsPort = c.https_port || 8443; } catch(e){}
+      const isLocal = ["localhost", "127.0.0.1", ""].includes(location.hostname);
+      let url;
+      if (!isLocal) {
+        url = `${location.origin}/mobile?session=${encodeURIComponent(sessionId)}`;
+      } else {
+        const port = location.protocol === "https:" ? location.port : httpsPort;
+        url = `https://${ip}:${port}/mobile?session=${encodeURIComponent(sessionId)}`;
+      }
+      document.getElementById("murl").textContent = url;
+      const box = document.getElementById("qr");
+      box.innerHTML = "";
+      if (window.QRCode) new QRCode(box, { text: url, width: 150, height: 150 });
+      else box.innerHTML = "<a href='"+url+"'>mobile link</a>";
+    }
+
+    makeQR();
+    connect();
+  </script>
+</body>
+</html>

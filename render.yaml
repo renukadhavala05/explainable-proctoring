@@ -1,0 +1,14 @@
+# Render.com blueprint. Deploy: push this repo to GitHub, then on Render
+# "New +" -> "Blueprint" -> pick the repo. Free plan sleeps when idle and
+# wakes automatically on the next request (~50s cold start).
+services:
+  - type: web
+    name: proctoring
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    autoDeploy: false
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"

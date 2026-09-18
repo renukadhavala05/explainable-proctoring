@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Candidate · Exam Session</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+  <script src="/static/js/vendor/face-api.min.js"></script>
+  <script type="module" src="/static/js/mp-setup.mjs"></script>
+  <script src="/static/js/detection.js?v=4"></script>
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">Candidate — Exam Session <small id="sidlbl"></small></div>
+    <span class="pill" id="statuspill" style="background:var(--panel2)">Idle</span>
+  </div>
+
+  <div class="wrap">
+    <div class="grid" style="grid-template-columns:1fr; max-width:760px; margin:0 auto">
+
+      <div class="card" id="enrollCard">
+        <h3>Step 1 · Identity enrollment</h3>
+        <p class="muted">Look straight at the camera in good light, then capture your reference face. This is used to verify it stays you during the exam.</p>
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap">
+          <input type="text" id="name" placeholder="Your name" />
+          <button class="btn" id="startCamBtn">Enable Camera</button>
+          <button class="btn secondary" id="captureBtn" disabled>Capture Reference Face</button>
+        </div>
+        <p class="muted" id="enrollMsg" style="margin-top:8px"></p>
+      </div>
+
+      <div class="videowrap">
+        <video id="video" autoplay muted playsinline></video>
+        <canvas id="overlay"></canvas>
+      </div>
+
+      <div id="banner" class="banner ok" style="display:none"></div>
+      <div class="status-line" id="status">Enable the camera to begin.</div>
+
+      <div class="card">
+        <h3>Step 2 · Start the exam</h3>
+        <p class="muted">Once enrolled, start the exam. Keep your face visible and eyes on the screen. Phones, books and other people will be flagged for the proctor to review.</p>
+        <button class="btn" id="startExamBtn" disabled>Start Exam</button>
+        <button class="btn danger" id="endBtn" disabled>End Exam</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const sessionId = params.get("session") || "exam-001";
+    document.getElementById("sidlbl").textContent = "· " + sessionId;
+    document.getElementById("sidlbl").parentElement;
+
+    const video = document.getElementById("video");
+    const overlay = document.getElementById("overlay");
+    const statusEl = document.getElementById("status");
+    const pill = document.getElementById("statuspill");
+    const banner = document.getElementById("banner");
+
+    let client = null;
+
+    function setStatus(s){ statusEl.textContent = s; }
+    function setPill(txt, level){
+      pill.textContent = txt;
+      pill.className = "pill lvl-" + (level||"low");
+      pill.style.background = "var(--panel2)";
+    }
+
+    document.getElementById("startCamBtn").onclick = async () => {
+      try {
+        client = new ProctorClient({
+          role: "candidate", sessionId, video, overlay,
+          onStatus: setStatus,
+          onSignals: () => {},
+          onServer: handleServer,
+        });
+        await client.start();
+        document.getElementById("captureBtn").disabled = false;
+        document.getElementById("startCamBtn").disabled = true;
+        setStatus("Camera on. Capture your reference face.");
+      } catch (e) {
+        setStatus("Camera error: " + e.message + ". Allow camera access and reload.");
+      }
+    };
+
+    document.getElementById("captureBtn").onclick = async () => {
+      document.getElementById("enrollMsg").textContent = "Capturing…";
+      const d = await client.captureDescriptor();
+      if (!d) { document.getElementById("enrollMsg").textContent = "No face detected — face the camera and try again."; return; }
+      const name = document.getElementById("name").value || "Candidate";
+      client.enroll(name);
+      document.getElementById("enrollMsg").textContent = "✅ Enrolled as " + name + ". You can start the exam.";
+      document.getElementById("startExamBtn").disabled = false;
+    };
+
+    document.getElementById("startExamBtn").onclick = () => {
+      document.getElementById("startExamBtn").disabled = true;
+      document.getElementById("endBtn").disabled = false;
+      document.getElementById("enrollCard").style.opacity = .6;
+      setStatus("Exam in progress — monitoring active.");
+      setPill("Monitoring", "low");
+    };
+
+    document.getElementById("endBtn").onclick = () => {
+      client && client.end();
+      setStatus("Exam ended.");
+      setPill("Ended");
+    };
+
+    function handleServer(msg){
+      if (msg.type === "warning") {
+        banner.style.display = "block";
+        banner.className = "banner warn";
+        banner.textContent = "⚠ " + msg.messages.join("  ·  ");
+        setPill("Risk " + Math.round(msg.risk), msg.risk_level);
+      } else if (msg.type === "ok") {
+        banner.className = "banner ok";
+        banner.style.display = "block";
+        banner.textContent = "All good — keep going.";
+        setPill("Risk " + Math.round(msg.risk), msg.risk_level);
+      }
+    }
+  </script>
+</body>
+</html>
